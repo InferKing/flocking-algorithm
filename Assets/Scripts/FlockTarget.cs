@@ -1,46 +1,42 @@
-using System.Collections.Generic;
 using UnityEngine;
+using Random = System.Random;
 
 public class FlockTarget : MonoBehaviour
 {
-    private static readonly List<FlockTarget> Targets = new();
+    [SerializeField]
+    private bool _makeActiveOnEnable = true;
 
-    [SerializeField] private bool makeActiveOnEnable = true;
-    [SerializeField, Min(0f)] private float spreadRadius = 1.2f;
-    [SerializeField, Min(0f)] private float verticalSpread = 0.25f;
-    [SerializeField, Min(0f)] private float arrivalRadius = 0.75f;
-    [SerializeField] private bool drawGizmos = true;
+    [SerializeField, Min(0f)]
+    private float _spreadRadius = 1.2f;
 
-    public static FlockTarget Active { get; private set; }
-    public float SpreadRadius => spreadRadius;
-    public float ArrivalRadius => arrivalRadius;
+    [SerializeField, Min(0f)]
+    private float _verticalSpread = 0.25f;
 
+    [SerializeField, Min(0f)]
+    private float _arrivalRadius = 0.75f;
+
+    [SerializeField]
+    private bool _drawGizmos = true;
+
+    public float SpreadRadius => _spreadRadius;
+    public float ArrivalRadius => _arrivalRadius;
+    public bool IsActive => FlockTargetRegistry.Active == this;
+
+    private System.Random _random;
+    
     private void OnEnable()
     {
-        if (!Targets.Contains(this))
-        {
-            Targets.Add(this);
-        }
-
-        if (makeActiveOnEnable || Active == null)
-        {
-            Active = this;
-        }
+        FlockTargetRegistry.Register(this, _makeActiveOnEnable);
     }
 
     private void OnDisable()
     {
-        Targets.Remove(this);
-
-        if (Active == this)
-        {
-            Active = Targets.Count > 0 ? Targets[0] : null;
-        }
+        FlockTargetRegistry.Unregister(this);
     }
 
     public void MakeActive()
     {
-        Active = this;
+        FlockTargetRegistry.MakeActive(this);
     }
 
     public Vector3 GetAssignedPosition(int seed)
@@ -48,49 +44,44 @@ public class FlockTarget : MonoBehaviour
         return transform.position + transform.rotation * GetStableOffset(seed);
     }
 
+    private void InitializeSeed(int seed)
+    {
+        if (_random != null)
+            return;
+
+        _random = new Random(seed & int.MaxValue);
+    }
+    
     private Vector3 GetStableOffset(int seed)
     {
-        if (spreadRadius <= 0f && verticalSpread <= 0f)
+        InitializeSeed(seed);
+        
+        if (_spreadRadius <= 0f && _verticalSpread <= 0f)
         {
             return Vector3.zero;
         }
 
-        float angle = Hash01(seed, 17) * Mathf.PI * 2f;
-        float radius = Mathf.Sqrt(Hash01(seed, 31)) * spreadRadius;
-        float height = (Hash01(seed, 47) * 2f - 1f) * verticalSpread;
+        var angle = (float)_random.NextDouble() * Mathf.PI * 2f;
+        var radius = Mathf.Sqrt((float)_random.NextDouble()) * _spreadRadius;
+        var height = ((float)_random.NextDouble() * 2f - 1f) * _verticalSpread;
 
         return new Vector3(Mathf.Cos(angle) * radius, height, Mathf.Sin(angle) * radius);
     }
 
-    private static float Hash01(int seed, int salt)
-    {
-        unchecked
-        {
-            uint value = (uint)seed;
-            value ^= (uint)salt * 0x9E3779B9u;
-            value ^= value >> 16;
-            value *= 0x7FEB352Du;
-            value ^= value >> 15;
-            value *= 0x846CA68Bu;
-            value ^= value >> 16;
-            return (value & 0x00FFFFFFu) / 16777215f;
-        }
-    }
-
     private void OnDrawGizmosSelected()
     {
-        if (!drawGizmos)
+        if (!_drawGizmos)
         {
             return;
         }
 
         Gizmos.color = Color.cyan;
-        Gizmos.DrawWireSphere(transform.position, spreadRadius);
+        Gizmos.DrawWireSphere(transform.position, _spreadRadius);
 
-        if (arrivalRadius > 0f)
+        if (_arrivalRadius > 0f)
         {
             Gizmos.color = Color.green;
-            Gizmos.DrawWireSphere(transform.position, arrivalRadius);
+            Gizmos.DrawWireSphere(transform.position, _arrivalRadius);
         }
     }
 }

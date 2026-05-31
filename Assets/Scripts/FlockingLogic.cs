@@ -1,191 +1,202 @@
-using System.Collections.Generic;
 using FishAlive;
 using UnityEngine;
 
 [RequireComponent(typeof(FishMotion))]
 public class FlockingLogic : MonoBehaviour
 {
-    private static readonly List<FlockingLogic> Agents = new();
-
     [Header("Target")]
-    [SerializeField] private FlockTarget target;
-    [SerializeField] private bool useActiveTarget = true;
-    [SerializeField, Min(0f)] private float targetWeight = 1.2f;
+    [SerializeField]
+    private FlockTarget _target;
+
+    [SerializeField]
+    private bool _useActiveTarget = true;
+
+    [SerializeField, Min(0f)]
+    private float _targetWeight = 1.2f;
 
     [Header("Flock")]
-    [SerializeField, Min(0.01f)] private float neighborRadius = 1.5f;
-    [SerializeField, Min(0.01f)] private float separationRadius = 0.45f;
-    [SerializeField, Min(0f)] private float separationWeight = 1.7f;
-    [SerializeField, Min(0f)] private float alignmentWeight = 0.8f;
-    [SerializeField, Min(0f)] private float cohesionWeight = 0.6f;
-    [SerializeField, Min(0f)] private float forwardWeight = 0.2f;
+    [SerializeField, Min(0.01f)]
+    private float _neighborRadius = 1.5f;
+
+    [SerializeField, Min(0.01f)]
+    private float _separationRadius = 0.45f;
+
+    [SerializeField, Min(0f)]
+    private float _separationWeight = 1.7f;
+
+    [SerializeField, Min(0f)]
+    private float _alignmentWeight = 0.8f;
+
+    [SerializeField, Min(0f)]
+    private float _cohesionWeight = 0.6f;
+
+    [SerializeField, Min(0f)]
+    private float _forwardWeight = 0.2f;
 
     [Header("Motion")]
-    [SerializeField, Min(0f)] private float cruiseMotionForce = 1.0f;
-    [SerializeField, Min(0f)] private float farTargetMotionForce = 1.6f;
-    [SerializeField, Min(0f)] private float nearTargetMotionForce = 0.45f;
-    [SerializeField, Min(0.02f)] private float steeringInterval = 0.12f;
-    [SerializeField, Min(0.1f)] private float turnVelocityMultiplier = 1.0f;
-    [SerializeField] private bool abortActiveTurns = false;
-    [SerializeField] private bool enableFishAvoidance = true;
+    [SerializeField, Min(0f)]
+    private float _cruiseMotionForce = 1.0f;
 
-    private FishMotion fishMotion;
-    private float nextSteeringTime;
-    private int stableSeed;
-    private bool fishMotionConfigured;
+    [SerializeField, Min(0f)]
+    private float _farTargetMotionForce = 1.6f;
+
+    [SerializeField, Min(0f)]
+    private float _nearTargetMotionForce = 0.45f;
+
+    [SerializeField, Min(0.02f)]
+    private float _steeringInterval = 0.12f;
+
+    [SerializeField, Min(0.1f)]
+    private float _turnVelocityMultiplier = 1.0f;
+
+    [SerializeField]
+    private bool _abortActiveTurns = false;
+
+    [SerializeField]
+    private bool _enableFishAvoidance = true;
+
+    private FishMotion _fishMotion;
+    private float _nextSteeringTime;
+    private int _stableSeed;
 
     private void Awake()
     {
-        fishMotion = GetComponent<FishMotion>();
-        stableSeed = GetInstanceID();
+        _fishMotion = GetComponent<FishMotion>();
+        _stableSeed = GetInstanceID();
     }
 
     private void OnEnable()
     {
-        if (!Agents.Contains(this))
-        {
-            Agents.Add(this);
-        }
-
-        fishMotionConfigured = false;
+        FlockAgentRegistry.Register(this);
     }
 
     private void OnDisable()
     {
-        Agents.Remove(this);
+        FlockAgentRegistry.Unregister(this);
     }
 
     private void Start()
     {
-        nextSteeringTime = Time.time + Random.value * steeringInterval;
-    }
+        _fishMotion.SetReachMode(ReachMode.Wander);
+        _fishMotion.SetAutoMotion(false);
+        _fishMotion.SetAvoidanceEnabled(_enableFishAvoidance);
+        _fishMotion.SetMotionForce(_cruiseMotionForce);
 
-    private void LateUpdate()
-    {
-        if (fishMotionConfigured)
-        {
-            return;
-        }
-
-        ConfigureFishMotion();
-        fishMotionConfigured = true;
-    }
-
-    private void ConfigureFishMotion()
-    {
-        fishMotion.SetReachMode(ReachMode.Wander);
-        fishMotion.SetAutoMotion(false);
-        fishMotion.SetAvoidanceEnabled(enableFishAvoidance);
-        fishMotion.SetMotionForce(cruiseMotionForce);
+        _nextSteeringTime = Time.time + Random.value * _steeringInterval;
     }
 
     private void Update()
     {
-        if (!fishMotionConfigured)
-        {
-            return;
-        }
-
-        if (Time.time < nextSteeringTime)
+        if (Time.time < _nextSteeringTime)
         {
             return;
         }
 
         Steer();
-        nextSteeringTime = Time.time + steeringInterval;
+        _nextSteeringTime = Time.time + _steeringInterval;
     }
 
+    /// <summary>
+    /// If need to set target manually
+    /// </summary>
+    /// <param name="newTarget">new Target, man</param>
     public void SetTarget(FlockTarget newTarget)
     {
-        target = newTarget;
+        _target = newTarget;
+        _useActiveTarget = newTarget == null;
     }
 
     private void Steer()
     {
-        Vector3 finalDirection = CalculateFlockDirection();
-        float motionForce = CalculateMotionForce();
+        var finalDirection = CalculateFlockDirection();
+        var motionForce = CalculateMotionForce();
 
         if (finalDirection.sqrMagnitude < 0.0001f)
         {
             finalDirection = transform.forward;
         }
 
-        fishMotion.SetMotionForce(motionForce);
-        fishMotion.StartTurnTowardsDirection(finalDirection.normalized, abortActiveTurns, turnVelocityMultiplier);
+        _fishMotion.SetMotionForce(motionForce);
+        _fishMotion.StartTurnTowardsDirection(finalDirection.normalized, _abortActiveTurns, _turnVelocityMultiplier);
     }
 
     private Vector3 CalculateFlockDirection()
     {
-        Vector3 position = transform.position;
-        Vector3 separation = Vector3.zero;
-        Vector3 alignment = Vector3.zero;
-        Vector3 cohesionCenter = Vector3.zero;
+        var ourTransform = transform;
+        var position = ourTransform.position;
+        var separation = Vector3.zero;
+        var alignment = Vector3.zero;
+        var cohesionCenter = Vector3.zero;
 
-        int neighborCount = 0;
-        int separationCount = 0;
-        float neighborRadiusSqr = neighborRadius * neighborRadius;
-        float separationRadiusSqr = separationRadius * separationRadius;
+        var neighborCount = 0;
+        var separationCount = 0;
+        var neighborRadiusSqr = _neighborRadius * _neighborRadius;
+        var separationRadiusSqr = _separationRadius * _separationRadius;
 
-        for (int i = 0; i < Agents.Count; i++)
+        var agents = FlockAgentRegistry.Agents;
+        
+        foreach (var other in agents)
         {
-            FlockingLogic other = Agents[i];
             if (other == this || !other.isActiveAndEnabled)
             {
                 continue;
             }
 
-            Vector3 toOther = other.transform.position - position;
-            float sqrDistance = toOther.sqrMagnitude;
+            var otherTransform = other.transform;
+            var otherPosition = otherTransform.position; 
+            var toOther = otherPosition - position;
+            var sqrDistance = toOther.sqrMagnitude;
             if (sqrDistance <= 0.0001f || sqrDistance > neighborRadiusSqr)
             {
                 continue;
             }
 
             neighborCount++;
-            alignment += other.transform.forward;
-            cohesionCenter += other.transform.position;
+            alignment += otherTransform.forward;
+            cohesionCenter += otherPosition;
 
             if (sqrDistance < separationRadiusSqr)
             {
-                float distance = Mathf.Sqrt(sqrDistance);
+                var distance = Mathf.Sqrt(sqrDistance);
                 separation -= toOther / Mathf.Max(distance * distance, 0.0001f);
                 separationCount++;
             }
         }
 
-        Vector3 direction = transform.forward * forwardWeight;
+        var direction = ourTransform.forward * _forwardWeight;
 
         if (separationCount > 0)
         {
-            direction += separation.normalized * separationWeight;
+            direction += separation.normalized * _separationWeight;
         }
 
         if (neighborCount > 0)
         {
-            direction += (alignment / neighborCount).normalized * alignmentWeight;
+            direction += (alignment / neighborCount).normalized * _alignmentWeight;
 
-            Vector3 center = cohesionCenter / neighborCount;
-            Vector3 toCenter = center - position;
+            var center = cohesionCenter / neighborCount;
+            var toCenter = center - position;
             if (toCenter.sqrMagnitude > 0.0001f)
             {
-                direction += toCenter.normalized * cohesionWeight;
+                direction += toCenter.normalized * _cohesionWeight;
             }
         }
 
-        FlockTarget resolvedTarget = ResolveTarget();
-        if (resolvedTarget != null)
+        var resolvedTarget = ResolveTarget();
+        
+        if (resolvedTarget)
         {
-            Vector3 targetPoint = resolvedTarget.GetAssignedPosition(stableSeed);
-            Vector3 toTarget = targetPoint - position;
-            float distanceToTarget = toTarget.magnitude;
+            var targetPoint = resolvedTarget.GetAssignedPosition(_stableSeed);
+            var toTarget = targetPoint - position;
+            var distanceToTarget = toTarget.magnitude;
 
             if (distanceToTarget > 0.0001f)
             {
-                float arrivalFactor = resolvedTarget.ArrivalRadius > 0f
+                var arrivalFactor = resolvedTarget.ArrivalRadius > 0f
                     ? Mathf.Clamp01(distanceToTarget / resolvedTarget.ArrivalRadius)
                     : 1f;
 
-                direction += toTarget.normalized * targetWeight * arrivalFactor;
+                direction += toTarget.normalized * (_targetWeight * arrivalFactor);
             }
         }
 
@@ -194,33 +205,34 @@ public class FlockingLogic : MonoBehaviour
 
     private float CalculateMotionForce()
     {
-        FlockTarget resolvedTarget = ResolveTarget();
-        if (resolvedTarget == null)
+        var resolvedTarget = ResolveTarget();
+        
+        if (!resolvedTarget)
         {
-            return cruiseMotionForce;
+            return _cruiseMotionForce;
         }
 
-        float distanceToTarget = Vector3.Distance(transform.position, resolvedTarget.GetAssignedPosition(stableSeed));
+        var distanceToTarget = Vector3.Distance(transform.position, resolvedTarget.GetAssignedPosition(_stableSeed));
         if (distanceToTarget <= resolvedTarget.ArrivalRadius)
         {
-            return nearTargetMotionForce;
+            return _nearTargetMotionForce;
         }
 
-        if (distanceToTarget >= resolvedTarget.ArrivalRadius + resolvedTarget.SpreadRadius + neighborRadius)
+        if (distanceToTarget >= resolvedTarget.ArrivalRadius + resolvedTarget.SpreadRadius + _neighborRadius)
         {
-            return farTargetMotionForce;
+            return _farTargetMotionForce;
         }
 
-        return cruiseMotionForce;
+        return _cruiseMotionForce;
     }
 
     private FlockTarget ResolveTarget()
     {
-        if (target != null)
+        if (_target)
         {
-            return target;
+            return _target;
         }
 
-        return useActiveTarget ? FlockTarget.Active : null;
+        return _useActiveTarget ? FlockTargetRegistry.Active : null;
     }
 }
