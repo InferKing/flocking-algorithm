@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using FishAlive;
 using UnityEngine;
 
@@ -43,9 +44,6 @@ public class FlockingLogic : MonoBehaviour
     [SerializeField, Min(0f)]
     private float _nearTargetMotionForce = 0.45f;
 
-    [SerializeField, Min(0.02f)]
-    private float _steeringInterval = 0.12f;
-
     [SerializeField, Min(0.1f)]
     private float _turnVelocityMultiplier = 1.0f;
 
@@ -56,11 +54,17 @@ public class FlockingLogic : MonoBehaviour
     private bool _enableFishAvoidance = true;
 
     private FishMotion _fishMotion;
-    private float _nextSteeringTime;
+    private Transform _transform;
+    private readonly List<FlockAgentSnapshot> _nearbyAgents = new();
     private int _stableSeed;
+    private int _steeringIndex;
+
+    internal Transform CachedTransform => _transform;
+    internal int SteeringIndex => _steeringIndex;
 
     private void Awake()
     {
+        _transform = transform;
         _fishMotion = GetComponent<FishMotion>();
         _stableSeed = GetInstanceID();
     }
@@ -81,19 +85,6 @@ public class FlockingLogic : MonoBehaviour
         _fishMotion.SetAutoMotion(false);
         _fishMotion.SetAvoidanceEnabled(_enableFishAvoidance);
         _fishMotion.SetMotionForce(_cruiseMotionForce);
-
-        _nextSteeringTime = Time.time + Random.value * _steeringInterval;
-    }
-
-    private void Update()
-    {
-        if (Time.time < _nextSteeringTime)
-        {
-            return;
-        }
-
-        Steer();
-        _nextSteeringTime = Time.time + _steeringInterval;
     }
 
     /// <summary>
@@ -106,14 +97,19 @@ public class FlockingLogic : MonoBehaviour
         _useActiveTarget = newTarget == null;
     }
 
-    private void Steer()
+    internal void SetSteeringIndex(int steeringIndex)
+    {
+        _steeringIndex = steeringIndex;
+    }
+
+    internal void Steer()
     {
         var finalDirection = CalculateFlockDirection();
         var motionForce = CalculateMotionForce();
 
         if (finalDirection.sqrMagnitude < 0.0001f)
         {
-            finalDirection = transform.forward;
+            finalDirection = _transform.forward;
         }
 
         _fishMotion.SetMotionForce(motionForce);
@@ -122,8 +118,8 @@ public class FlockingLogic : MonoBehaviour
 
     private Vector3 CalculateFlockDirection()
     {
-        var ourTransform = transform;
-        var position = ourTransform.position;
+        var position = _transform.position;
+        var forward = _transform.forward;
         var separation = Vector3.zero;
         var alignment = Vector3.zero;
         var cohesionCenter = Vector3.zero;
@@ -133,17 +129,17 @@ public class FlockingLogic : MonoBehaviour
         var neighborRadiusSqr = _neighborRadius * _neighborRadius;
         var separationRadiusSqr = _separationRadius * _separationRadius;
 
-        var agents = FlockAgentRegistry.Agents;
-        
-        foreach (var other in agents)
+        FlockAgentRegistry.GetNearby(position, _neighborRadius, _nearbyAgents);
+
+        for (var i = 0; i < _nearbyAgents.Count; i++)
         {
-            if (other == this || !other.isActiveAndEnabled)
+            var other = _nearbyAgents[i];
+            if (ReferenceEquals(other.Agent, this))
             {
                 continue;
             }
 
-            var otherTransform = other.transform;
-            var otherPosition = otherTransform.position; 
+            var otherPosition = other.Position;
             var toOther = otherPosition - position;
             var sqrDistance = toOther.sqrMagnitude;
             if (sqrDistance <= 0.0001f || sqrDistance > neighborRadiusSqr)
@@ -152,7 +148,7 @@ public class FlockingLogic : MonoBehaviour
             }
 
             neighborCount++;
-            alignment += otherTransform.forward;
+            alignment += other.Forward;
             cohesionCenter += otherPosition;
 
             if (sqrDistance < separationRadiusSqr)
@@ -163,7 +159,7 @@ public class FlockingLogic : MonoBehaviour
             }
         }
 
-        var direction = ourTransform.forward * _forwardWeight;
+        var direction = forward * _forwardWeight;
 
         if (separationCount > 0)
         {
@@ -184,7 +180,7 @@ public class FlockingLogic : MonoBehaviour
 
         var resolvedTarget = ResolveTarget();
         
-        if (resolvedTarget)
+        if (!ReferenceEquals(resolvedTarget, null))
         {
             var targetPoint = resolvedTarget.GetAssignedPosition(_stableSeed);
             var toTarget = targetPoint - position;
@@ -207,12 +203,12 @@ public class FlockingLogic : MonoBehaviour
     {
         var resolvedTarget = ResolveTarget();
         
-        if (!resolvedTarget)
+        if (ReferenceEquals(resolvedTarget, null))
         {
             return _cruiseMotionForce;
         }
 
-        var distanceToTarget = Vector3.Distance(transform.position, resolvedTarget.GetAssignedPosition(_stableSeed));
+        var distanceToTarget = Vector3.Distance(_transform.position, resolvedTarget.GetAssignedPosition(_stableSeed));
         if (distanceToTarget <= resolvedTarget.ArrivalRadius)
         {
             return _nearTargetMotionForce;
@@ -228,7 +224,7 @@ public class FlockingLogic : MonoBehaviour
 
     private FlockTarget ResolveTarget()
     {
-        if (_target)
+        if (!ReferenceEquals(_target, null))
         {
             return _target;
         }
